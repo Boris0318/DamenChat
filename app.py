@@ -179,8 +179,8 @@ def process_uploaded_file(uploaded_file):
     db_name = "chroma_db"
     
     # Delete the database when adding new documents
-    # if os.path.exists(db_name):
-    #     Chroma(persist_directory=db_name, embedding_function=embeddings).delete_collection()
+    if os.path.exists(db_name):
+        Chroma(persist_directory=db_name, embedding_function=embeddings).delete_collection()
     
     vector_store = Chroma(embedding_function=embeddings, persist_directory=db_name)
     
@@ -239,6 +239,7 @@ if prompt := st.chat_input("Ask a question about the uploaded document"):
         st.error("Please upload a JSON file first.")
     else:
         # Add user message to conversation
+        st.session_state.conversation.append({"role": "user", "content": preprompt_5})
         st.session_state.conversation.append({"role": "user", "content": prompt})
         st.chat_message("user").write(prompt)
         
