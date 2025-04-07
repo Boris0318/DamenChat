@@ -179,8 +179,8 @@ def process_uploaded_file(uploaded_file):
     db_name = "chroma_db"
     
     # Delete the database when adding new documents
-    if os.path.exists(db_name):
-        Chroma(persist_directory=db_name, embedding_function=embeddings).delete_collection()
+    # if os.path.exists(db_name):
+    #     Chroma(persist_directory=db_name, embedding_function=embeddings).delete_collection()
     
     vector_store = Chroma(embedding_function=embeddings, persist_directory=db_name)
     
