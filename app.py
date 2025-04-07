@@ -171,9 +171,9 @@ async def evaluate_equation(latex_expr: str) -> str:
 # Function to process uploaded JSON file and create vector store
 def process_uploaded_file(uploaded_file):
     # Save uploaded file to a temporary file
-    with tempfile.NamedTemporaryFile(delete=False, suffix='.json') as temp_file:
-        temp_file.write(uploaded_file.getvalue())
-        temp_path = temp_file.name
+    # with tempfile.NamedTemporaryFile(delete=False, suffix='.json') as temp_file:
+    #     temp_file.write(uploaded_file.getvalue())
+    #     temp_path = temp_file.name
     
     # Create vector store
     db_name = "chroma_db"
@@ -186,7 +186,7 @@ def process_uploaded_file(uploaded_file):
     
     # Load documents from JSON
     loader = JSONLoader(
-        file_path=temp_path,
+        file_path=uploaded_file,
         jq_schema=".[].content",
         text_content=False,
     )
@@ -201,7 +201,7 @@ def process_uploaded_file(uploaded_file):
     _ = vector_store.add_documents(documents=all_splits)
     
     # Clean up temp file
-    os.unlink(temp_path)
+    os.unlink(uploaded_file)
     
     return vector_store
 
