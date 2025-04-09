@@ -176,6 +176,45 @@ async def evaluate_equation(latex_expr: str) -> str:
         return f"An error occurred: {e}"
 
 # Function to process uploaded JSON file and create vector store
+# def process_uploaded_file(uploaded_file):
+#     # Save uploaded file to a temporary file
+#     with tempfile.NamedTemporaryFile(delete=False, suffix='.json') as temp_file:
+#         temp_file.write(uploaded_file.getvalue())
+#         temp_path = temp_file.name
+    
+#     # Create vector store
+#     db_name = "chroma_db"
+    
+#     # Delete the database when adding new documents
+#     if os.path.exists(db_name):
+#         Chroma(persist_directory=db_name, embedding_function=embeddings).delete_collection()
+    
+#     vector_store = Chroma(embedding_function=embeddings, persist_directory=db_name)
+    
+#     # Load documents from JSON
+#     loader = JSONLoader(
+#         file_path=temp_path,
+#         jq_schema=".[].content",
+#         text_content=False,
+#     )
+    
+#     docs = loader.load()
+    
+#     # Define the size of chunks and overlap
+#     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+#     all_splits = text_splitter.split_documents(docs)
+    
+#     # Index chunks
+#     _ = vector_store.add_documents(documents=all_splits)
+    
+#     # Clean up temp file
+#     os.unlink(temp_path)
+
+    
+    
+#     return vector_store
+
+
 def process_uploaded_file(uploaded_file):
     # Save uploaded file to a temporary file
     with tempfile.NamedTemporaryFile(delete=False, suffix='.json') as temp_file:
@@ -191,26 +230,28 @@ def process_uploaded_file(uploaded_file):
     
     vector_store = Chroma(embedding_function=embeddings, persist_directory=db_name)
     
-    # Load documents from JSON
-    loader = JSONLoader(
-        file_path=temp_path,
-        jq_schema=".[].content",
-        text_content=False,
-    )
-    
-    docs = loader.load()
-    
-    # Define the size of chunks and overlap
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    all_splits = text_splitter.split_documents(docs)
-    
-    # Index chunks
-    _ = vector_store.add_documents(documents=all_splits)
-    
-    # Clean up temp file
-    os.unlink(temp_path)
+    try:
+        # Load documents from JSON
+        loader = JSONLoader(
+            file_path=temp_path,
+            jq_schema=".[].content",
+            text_content=False,
+        )
+        
+        docs = loader.load()
+        
+        # Define the size of chunks and overlap
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+        all_splits = text_splitter.split_documents(docs)
+        
+        # Index chunks
+        _ = vector_store.add_documents(documents=all_splits)
+    finally:
+        # Clean up temp file
+        os.unlink(temp_path)
     
     return vector_store
+
 
 # Main application
 st.title("Damen Technical Chatbot")
