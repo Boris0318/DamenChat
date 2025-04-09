@@ -249,12 +249,11 @@ if prompt := st.chat_input("Ask a question about the uploaded document"):
     if not st.session_state.vector_store:
         st.error("Please upload a JSON file first.")
     else:
-        
-        # Add user message to conversation
-        # st.session_state.conversation.append({"role": "user", "content": prompt})
+
         if st.session_state.first_query:
             st.session_state.conversation.append(f"User: {preprompt_5}")
             st.session_state.first_query = False
+            
         st.session_state.conversation.append(f"User: {prompt}")
         st.chat_message("user").write(prompt)
         
