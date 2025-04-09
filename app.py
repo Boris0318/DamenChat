@@ -1,9 +1,3 @@
-import sys
-try:
-    __import__("pysqlite3")
-    sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
-except ImportError:
-    pass
 import os
 import streamlit as st
 import asyncio
@@ -40,10 +34,50 @@ def authenticate():
             st.error(f"Incorrect password. {5 - st.session_state.attempts} attempts remaining.")
         return False
 
+# Initialize session state for storing conversation
+if "conversation" not in st.session_state:
+    st.session_state.conversation = []
+    
+if "vector_store" not in st.session_state:
+    st.session_state.vector_store = None
+    
+if "first_query" not in st.session_state:
+    st.session_state.first_query = True
+
+# Setup environment variables from Streamlit secrets
+@st.cache_resource
+def setup_environment():
+    os.environ['LANGSMITH_API_KEY'] = st.secrets["LANGSMITH_API"]
+    os.environ['OPENAI_API_KEY'] = st.secrets["OPEN_AI_API"]
+    os.environ['ANTHROPIC_API_KEY'] = st.secrets["CLAUDE_API"]
+    
+    wolfram_id = st.secrets["WOLFRAM_CLIENT"]
+    client = wolframalpha.Client(wolfram_id)
+    
+    return client
+
+# Initialize models and embeddings
+@st.cache_resource
+def init_models():
+    embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
+    model_id = "claude-3-7-sonnet-20250219"
+    
+    # Add max_tokens parameter to ensure complete responses
+    # llm1 = init_chat_model(model_id, model_provider="anthropic", temperature=0)
+    # llm2 = init_chat_model(model_id, model_provider="anthropic", temperature=0)
+    # llm3 = init_chat_model(model_id, model_provider="anthropic", temperature=0)
+
+    llm1 = init_chat_model(model_id, model_provider="anthropic", temperature=0, max_tokens=4096)
+    llm2 = init_chat_model(model_id, model_provider="anthropic", temperature=0, max_tokens=4096)
+    llm3 = init_chat_model(model_id, model_provider="anthropic", temperature=0, max_tokens=4096)
+    
+    return embeddings, llm1, llm2, llm3
+
 # Function to reset chat
 def reset_chat():
     st.session_state.conversation = []
     st.session_state.vector_store = None
+    st.session_state.first_query = True
     st.success("Chat has been reset. You can upload a new document and start a new conversation.")
 
 # Authentication screen
@@ -65,35 +99,8 @@ if not st.session_state.authenticated:
     """)
     st.stop()
 
-# Main application (only runs if authenticated)
-st.title("Damen Technical Chatbot")
-
-# Setup environment variables from Streamlit secrets
-@st.cache_resource
-def setup_environment():
-    os.environ['LANGSMITH_API_KEY'] = st.secrets["LANGSMITH_API"]
-    os.environ['OPENAI_API_KEY'] = st.secrets["OPEN_AI_API"]
-    os.environ['ANTHROPIC_API_KEY'] = st.secrets["CLAUDE_API"]
-    
-    wolfram_id = st.secrets["WOLFRAM_CLIENT"]
-    client = wolframalpha.Client(wolfram_id)
-    
-    return client
-
+# Only run the following code if authenticated
 client = setup_environment()
-
-# Initialize models and embeddings
-@st.cache_resource
-def init_models():
-    embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
-    model_id = "claude-3-7-sonnet-20250219"
-    
-    llm1 = init_chat_model(model_id, model_provider="anthropic", temperature=0)
-    llm2 = init_chat_model(model_id, model_provider="anthropic", temperature=0)
-    llm3 = init_chat_model(model_id, model_provider="anthropic", temperature=0)
-    
-    return embeddings, llm1, llm2, llm3
-
 embeddings, llm1, llm2, llm3 = init_models()
 
 # Define the preprompt
@@ -171,9 +178,9 @@ async def evaluate_equation(latex_expr: str) -> str:
 # Function to process uploaded JSON file and create vector store
 def process_uploaded_file(uploaded_file):
     # Save uploaded file to a temporary file
-    # with tempfile.NamedTemporaryFile(delete=False, suffix='.json') as temp_file:
-    #     temp_file.write(uploaded_file.getvalue())
-    #     temp_path = temp_file.name
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.json') as temp_file:
+        temp_file.write(uploaded_file.getvalue())
+        temp_path = temp_file.name
     
     # Create vector store
     db_name = "chroma_db"
@@ -186,7 +193,7 @@ def process_uploaded_file(uploaded_file):
     
     # Load documents from JSON
     loader = JSONLoader(
-        file_path=uploaded_file,
+        file_path=temp_path,
         jq_schema=".[].content",
         text_content=False,
     )
@@ -201,9 +208,12 @@ def process_uploaded_file(uploaded_file):
     _ = vector_store.add_documents(documents=all_splits)
     
     # Clean up temp file
-    os.unlink(uploaded_file)
+    os.unlink(temp_path)
     
     return vector_store
+
+# Main application
+st.title("Damen Technical Chatbot")
 
 # Streamlit UI components for sidebar
 st.sidebar.title("Upload Document")
@@ -213,12 +223,13 @@ uploaded_file = st.sidebar.file_uploader("Upload a JSON file", type=["json"])
 if st.sidebar.button("Reset Chat", key="reset_button"):
     reset_chat()
 
-# Initialize session state for storing conversation
-if "conversation" not in st.session_state:
+# Add a logout button
+if st.sidebar.button("Logout"):
+    st.session_state.authenticated = False
+    st.session_state.attempts = 0
     st.session_state.conversation = []
-    
-if "vector_store" not in st.session_state:
     st.session_state.vector_store = None
+    st.rerun()
 
 # Process uploaded file
 if uploaded_file and not st.session_state.vector_store:
@@ -228,19 +239,23 @@ if uploaded_file and not st.session_state.vector_store:
 
 # Display conversation
 for message in st.session_state.conversation:
-    if message["role"] == "user":
-        st.chat_message("user").write(message["content"])
-    else:
-        st.chat_message("assistant").write(message["content"])
+    if message.startswith("User:"):
+        st.chat_message("user").write(message.replace("User:", "").strip())
+    elif message.startswith("LLM:"):
+        st.chat_message("assistant").write(message.replace("LLM:", "").strip())
 
 # Chat input
 if prompt := st.chat_input("Ask a question about the uploaded document"):
     if not st.session_state.vector_store:
         st.error("Please upload a JSON file first.")
     else:
+        
         # Add user message to conversation
-        st.session_state.conversation.append({"role": "user", "content": preprompt_5})
-        st.session_state.conversation.append({"role": "user", "content": prompt})
+        # st.session_state.conversation.append({"role": "user", "content": prompt})
+        if st.session_state.first_query:
+            st.session_state.conversation.append(f"User: {preprompt_5}")
+            st.session_state.first_query = False
+        st.session_state.conversation.append(f"User: {prompt}")
         st.chat_message("user").write(prompt)
         
         # Process user input and generate response
@@ -249,9 +264,8 @@ if prompt := st.chat_input("Ask a question about the uploaded document"):
             retrieved_docs = st.session_state.vector_store.similarity_search(prompt, k=5)
             docs_content = "\n\n".join(doc.page_content for doc in retrieved_docs)
             
-            # Get conversation history
-            past_conversation = "\n".join([f"{'User' if msg['role'] == 'user' else 'LLM'}: {msg['content']}" 
-                                          for msg in st.session_state.conversation[-16:]])
+            # Get conversation history - limit to last 10 exchanges to avoid token limits
+            past_conversation = "\n".join(st.session_state.conversation[-20:])
             
             # Generate response with LLM1
             full_prompt = f"""
@@ -300,14 +314,13 @@ if prompt := st.chat_input("Ask a question about the uploaded document"):
             
             # Evaluate equations with Wolfram Alpha
             evaluated_results = []
-            if "No" not in list_equations:
-                for line in list_equations.split("\n"):
-                    line = line.strip()
-                    if "$" in line:
-                        eq = line.replace("$$", "").strip()
-                        if eq:
-                            evaluated_eq = asyncio.run(evaluate_equation(eq))
-                            evaluated_results.append(f"{eq} → {evaluated_eq}")
+            for line in list_equations.split("\n"):
+                line = line.strip()
+                if "$" in line:
+                    eq = line.replace("$$", "").strip()
+                    if eq:
+                        evaluated_eq = asyncio.run(evaluate_equation(eq))
+                        evaluated_results.append(f"{eq} → {evaluated_eq}")
             
             # Combine results
             final_response = f"General Response:\n{response}\n"
@@ -329,17 +342,18 @@ if prompt := st.chat_input("Ask a question about the uploaded document"):
             - Only retrieve the first equation with its value, as it may be more than one equation for the same parameter
             - Remove all the other equivalent equations if any
             - Then using the new value from the sanity check, you job is to find that same value in the "General response" and replace it there
+            - Extract the values using a three decimal approximation
             - Do not change notation
             - If no such equations exist, just return the original response you got without any change
             - It is crutial you follow these instructions, failure to this would mean fatality
+            - IMPORTANT: Provide a complete response. Do not cut off your answer mid-sentence or mid-calculation.
             Context:
             {final_response}
             """
             
             final_output = llm3.invoke(third_prompt).content
             
-            # Add assistant message to conversation
-            st.session_state.conversation.append({"role": "assistant", "content": final_output})
+            st.session_state.conversation.append(f"LLM:{final_output}")
             st.chat_message("assistant").write(final_output)
 
 # Add information about the app
@@ -356,12 +370,4 @@ st.sidebar.info(
     
     Use the "Reset Chat" button to clear the conversation and start a new session.
     """
-)
-
-# Add a logout option
-if st.sidebar.button("Logout"):
-    st.session_state.authenticated = False
-    st.session_state.attempts = 0
-    st.session_state.conversation = []
-    st.session_state.vector_store = None
-    st.rerun()
+) 
