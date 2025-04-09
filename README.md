@@ -17,6 +17,7 @@ First working online version of the app : 09-04-2025
 - Migrate the app within Azure
 
 ## IMPORTANT NOTES:
+- If you run the app locally some folder will be added into the chroma_db folder, do not push these files into the github.
 - You might get an error 529 which means that the servers of Anthropic are overloaded, this does not have to do with the code
 - Another error you might get is that you do not have enough credits, this erros basically means we ran out of money and we need to put more money to use the API: https://console.anthropic.com/settings/billing
 - Keep in mind the longer the conversations the more we will pay.
