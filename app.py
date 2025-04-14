@@ -194,30 +194,44 @@ def process_uploaded_file(uploaded_file):
     db_name = "chroma_db"
     
     # Delete the database when adding new documents
-    if os.path.exists(db_name):
-        Chroma(persist_directory=db_name, embedding_function=embeddings).delete_collection()
+    # if os.path.exists(db_name):
+    #     Chroma(persist_directory=db_name, embedding_function=embeddings).delete_collection()
     
     vector_store = Chroma(embedding_function=embeddings, persist_directory=db_name)
     
-    try:
-        # Load documents from JSON
-        loader = JSONLoader(
-            file_path=temp_path,
-            jq_schema=".[].content",
-            text_content=False,
-        )
+    # try:
+    #     # Load documents from JSON
+    #     loader = JSONLoader(
+    #         file_path=temp_path,
+    #         jq_schema=".[].content",
+    #         text_content=False,
+    #     )
         
-        docs = loader.load()
+    #     docs = loader.load()
         
-        # Define the size of chunks and overlap
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-        all_splits = text_splitter.split_documents(docs)
+    #     # Define the size of chunks and overlap
+    #     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    #     all_splits = text_splitter.split_documents(docs)
         
-        # Index chunks
-        _ = vector_store.add_documents(documents=all_splits)
-    finally:
-        # Clean up temp file
-        os.unlink(temp_path)
+    #     # Index chunks
+    #     _ = vector_store.add_documents(documents=all_splits)
+    # finally:
+    #     # Clean up temp file
+    #     os.unlink(temp_path)
+    loader = JSONLoader(
+        file_path=temp_path,
+        jq_schema=".[].content",
+        text_content=False,
+    )
+    docs = loader.load()
+    
+    # Define the size of chunks and overlap
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    all_splits = text_splitter.split_documents(docs)
+    
+    # Index chunks
+    _ = vector_store.add_documents(documents=all_splits)
+    
     
     return vector_store
 
