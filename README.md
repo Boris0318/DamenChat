@@ -13,8 +13,10 @@ app.py: Main file that is executed to run the complete app virtually and locally
 First working online version of the app : 09-04-2025
 
 ## TODO:
+- Add a window that allows the user to convert a pdf into the json files we are using
 - Maybe restructure the format of the code as everything is run on the same file for now, so for example: one file to design the web and another file that runs the backend of the application.
 - Migrate the app within Azure
+- Change API for open ai
 
 ## IMPORTANT NOTES:
 - If you run the app locally some folder will be added into the chroma_db folder, do not push these files into the github.
