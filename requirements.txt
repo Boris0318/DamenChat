@@ -9,4 +9,4 @@ openai==1.61.0
 jq==1.8.0
 langchain-anthropic==0.3.10
 pysqlite3-binary
-chromadb==0.6.3
+# chromadb==0.6.3
