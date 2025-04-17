@@ -15,37 +15,59 @@ from langchain_community.document_loaders import JSONLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 import tempfile
 import toml
+import threading
+import time
+from datetime import datetime
 
 # Page configuration
 st.set_page_config(page_title="Damen Technical Chatbot", layout="wide")
-st.title("Damen Technical Chatbot")
+
+# Initialize session state for authentication
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if "attempts" not in st.session_state:
+    st.session_state.attempts = 0
+
+# Function to handle authentication
+def authenticate():
+    if st.session_state.password == st.secrets["APP_PASSWORD"]:
+        st.session_state.authenticated = True
+        st.session_state.attempts = 0
+        return True
+    else:
+        st.session_state.attempts += 1
+        if st.session_state.attempts >= 5:
+            st.error("Maximum attempts reached. Please try again later.")
+            st.stop()
+        else:
+            st.error(f"Incorrect password. {5 - st.session_state.attempts} attempts remaining.")
+        return False
+
+# Initialize session state for storing conversation
+if "conversation" not in st.session_state:
+    st.session_state.conversation = []
+    
+if "vector_store" not in st.session_state:
+    st.session_state.vector_store = None
+    
+if "first_query" not in st.session_state:
+    st.session_state.first_query = True
 
 # Function to load secrets dynamically
 def load_secrets():
     try:
-        # Adjust path to your secrets.toml file
         secrets = toml.load(".streamlit/secrets.toml")
-        return secrets
-    except FileNotFoundError:
-        st.error("Secrets file not found!")
-        return {}
-
-# def load_secrets():
-#     try:
-#         # Adjust path to your secrets.toml file
-#         secrets = toml.load("passwords.toml")
-#         return secrets
-#     except FileNotFoundError:
-#         st.error("Secrets file not found!")
-#         return {}
+        return secrets, os.path.getmtime(".streamlit/secrets.toml")
+    except (FileNotFoundError, OSError):
+        st.error("Secrets file not found or inaccessible!")
+        return {}, None
 
 # Setup environment variables from secrets
 @st.cache_resource
 def setup_environment(_secrets=None):
-    # Use provided secrets or load dynamically
-    secrets = _secrets if _secrets is not None else load_secrets()
+    secrets = _secrets if _secrets is not None else load_secrets()[0]
     
-    # Set environment variables
     os.environ['LANGSMITH_API_KEY'] = secrets.get("LANGSMITH_API", "")
     os.environ['OPENAI_API_KEY'] = secrets.get("OPEN_AI_API", "")
     os.environ['ANTHROPIC_API_KEY'] = secrets.get("CLAUDE_API", "")
@@ -55,35 +77,64 @@ def setup_environment(_secrets=None):
     
     return client
 
-# Load initial secrets and setup environment
-secrets = load_secrets()
-client = setup_environment(secrets)
+# Background thread to monitor secrets file
+def monitor_secrets():
+    last_modified = None
+    while True:
+        secrets, modified_time = load_secrets()
+        if modified_time and modified_time != last_modified:
+            last_modified = modified_time
+            setup_environment.clear()
+            global client
+            client = setup_environment(secrets)
+            st.session_state.secrets_updated = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        time.sleep(10)  # Check every 10 seconds
 
-# Sidebar button to refresh secrets
-st.sidebar.markdown("---")
-if st.sidebar.button("Refresh Secrets"):
-    with st.spinner("Reloading secrets..."):
-        # Clear cached environment
-        setup_environment.clear()
-        # Load new secrets and reinitialize
-        secrets = load_secrets()
-        client = setup_environment(secrets)
-        st.success("Secrets reloaded successfully!")
+# Start secrets monitoring thread
+if "secrets_monitor_started" not in st.session_state:
+    st.session_state.secrets_monitor_started = True
+    st.session_state.secrets_updated = None
+    threading.Thread(target=monitor_secrets, daemon=True).start()
 
-# Password input for chat access
-if "password_validated" not in st.session_state:
-    st.session_state.password_validated = False
+# Initialize client
+client = None
 
-st.sidebar.markdown("---")
-st.sidebar.subheader("Chat Access")
-password_input = st.sidebar.text_input("Enter Password", type="password")
-if password_input:
-    if password_input == secrets.get("CHAT_PASSWORD", ""):
-        st.session_state.password_validated = True
-        st.sidebar.success("Password accepted! You can now use the chat.")
-    else:
-        st.session_state.password_validated = False
-        st.sidebar.error("Incorrect password. Please try again.")
+# Function to refresh secrets
+def refresh_secrets():
+    global client
+    setup_environment.clear()
+    secrets, _ = load_secrets()
+    client = setup_environment(secrets)
+    st.session_state.secrets_updated = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    st.sidebar.success("Secrets reloaded successfully!")
+
+# Initialize client
+client = setup_environment()
+
+# Authentication screen
+if not st.session_state.authenticated:
+    st.title("Welcome to Damen Technical Chatbot")
+    st.markdown("""
+    This application provides access to technical documentation and equation analysis.
+    Please enter the password to continue.
+    """)
+    
+    st.sidebar.title("Authentication")
+    st.sidebar.text_input("Enter Password", type="password", key="password", on_change=authenticate)
+    
+    # Add Refresh Secrets button in the sidebar
+    if st.sidebar.button("Refresh Secrets"):
+        with st.spinner("Reloading secrets..."):
+            refresh_secrets()
+    
+    # Display login-related graphics or info
+    st.markdown("---")
+    st.markdown("### About Damen Technical Chatbot")
+    st.markdown("""
+    This chatbot is designed to analyze technical documents, including equations and parameters.
+    It can assist with engineering calculations and provides access to technical specifications.
+    """)
+    st.stop()
 
 # Initialize models and embeddings
 @st.cache_resource
@@ -91,12 +142,20 @@ def init_models():
     embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
     model_id = "claude-3-7-sonnet-20250219"
     
-    llm1 = init_chat_model(model_id, model_provider="anthropic", temperature=0)
-    llm2 = init_chat_model(model_id, model_provider="anthropic", temperature=0)
-    llm3 = init_chat_model(model_id, model_provider="anthropic", temperature=0)
+    llm1 = init_chat_model(model_id, model_provider="anthropic", temperature=0, max_tokens=4096)
+    llm2 = init_chat_model(model_id, model_provider="anthropic", temperature=0, max_tokens=4096)
+    llm3 = init_chat_model(model_id, model_provider="anthropic", temperature=0, max_tokens=4096)
     
     return embeddings, llm1, llm2, llm3
 
+# Function to reset chat
+def reset_chat():
+    st.session_state.conversation = []
+    st.session_state.vector_store = None
+    st.session_state.first_query = True
+    st.success("Chat has been reset. You can upload a new document and start a new conversation.")
+
+# Only run the following code if authenticated
 embeddings, llm1, llm2, llm3 = init_models()
 
 # Define the preprompt
@@ -187,37 +246,46 @@ def process_uploaded_file(uploaded_file):
     
     vector_store = Chroma(embedding_function=embeddings, persist_directory=db_name)
     
-    # Load documents from JSON
-    loader = JSONLoader(
-        file_path=temp_path,
-        jq_schema=".[].content",
-        text_content=False,
-    )
-    
-    docs = loader.load()
-    
-    # Define the size of chunks and overlap
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    all_splits = text_splitter.split_documents(docs)
-    
-    # Index chunks
-    _ = vector_store.add_documents(documents=all_splits)
-    
-    # Clean up temp file
-    os.unlink(temp_path)
+    try:
+        # Load documents from JSON
+        loader = JSONLoader(
+            file_path=temp_path,
+            jq_schema=".[].content",
+            text_content=False,
+        )
+        
+        docs = loader.load()
+        
+        # Define the size of chunks and overlap
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+        all_splits = text_splitter.split_documents(docs)
+        
+        # Index chunks
+        _ = vector_store.add_documents(documents=all_splits)
+    finally:
+        # Clean up temp file
+        os.unlink(temp_path)
     
     return vector_store
 
-# Streamlit UI components
+# Main application
+st.title("Damen Technical Chatbot")
+
+# Streamlit UI components for sidebar
 st.sidebar.title("Upload Document")
 uploaded_file = st.sidebar.file_uploader("Upload a JSON file", type=["json"])
 
-# Initialize session state for storing conversation
-if "conversation" not in st.session_state:
+# Add a reset button to the sidebar
+if st.sidebar.button("Reset Chat", key="reset_button"):
+    reset_chat()
+
+# Add a logout button
+if st.sidebar.button("Logout"):
+    st.session_state.authenticated = False
+    st.session_state.attempts = 0
     st.session_state.conversation = []
-    
-if "vector_store" not in st.session_state:
     st.session_state.vector_store = None
+    st.rerun()
 
 # Process uploaded file
 if uploaded_file and not st.session_state.vector_store:
@@ -227,121 +295,120 @@ if uploaded_file and not st.session_state.vector_store:
 
 # Display conversation
 for message in st.session_state.conversation:
-    if message["role"] == "user":
-        st.chat_message("user").write(message["content"])
+    if message.startswith("User:"):
+        st.chat_message("user").write(message.replace("User:", "").strip())
+    elif message.startswith("LLM:"):
+        st.chat_message("assistant").write(message.replace("LLM:", "").strip())
+
+# Chat input
+if prompt := st.chat_input("Ask a question about the uploaded document"):
+    if not st.session_state.vector_store:
+        st.error("Please upload a JSON file first.")
     else:
-        st.chat_message("assistant").write(message["content"])
-
-# Chat input (enabled only if password is validated)
-if not st.session_state.password_validated:
-    st.chat_message("assistant").write("Please enter the correct password in the sidebar to access the chat.")
-else:
-    if prompt := st.chat_input("Ask a question about the uploaded document"):
-        if not st.session_state.vector_store:
-            st.error("Please upload a JSON file first.")
-        else:
-            # Add user message to conversation
-            st.session_state.conversation.append({"role": "user", "content": prompt})
-            st.chat_message("user").write(prompt)
+        if st.session_state.first_query:
+            st.session_state.conversation.append(f"User: {preprompt_5}")
+            st.session_state.first_query = False
             
-            # Process user input and generate response
-            with st.spinner("Thinking..."):
-                # Retrieve relevant documents
-                retrieved_docs = st.session_state.vector_store.similarity_search(prompt, k=5)
-                docs_content = "\n\n".join(doc.page_content for doc in retrieved_docs)
-                
-                # Get conversation history
-                past_conversation = "\n".join([f"{'User' if msg['role'] == 'user' else 'LLM'}: {msg['content']}" 
-                                            for msg in st.session_state.conversation[-16:]])
-                
-                # Generate response with LLM1
-                full_prompt = f"""
-                You are an assistant that remembers past messages. Use the conversation history below to stay consistent.
+        st.session_state.conversation.append(f"User: {prompt}")
+        st.chat_message("user").write(prompt)
+        
+        # Process user input and generate response
+        with st.spinner("Thinking..."):
+            # Retrieve relevant documents
+            retrieved_docs = st.session_state.vector_store.similarity_search(prompt, k=20)
+            docs_content = "\n\n".join(doc.page_content for doc in retrieved_docs)
+            
+            # Get conversation history - limit to last 10 exchanges to avoid token limits
+            past_conversation = "\n".join(st.session_state.conversation[-20:])
+            
+            # Generate response with LLM1
+            full_prompt = f"""
+            You are an assistant that remembers past messages. Use the conversation history below to stay consistent.
 
-                Conversation so far:
-                {past_conversation}
+            Conversation so far:
+            {past_conversation}
 
-                Context:
-                {docs_content}
+            Context:
+            {docs_content}
 
-                New Question:
-                {prompt}
-                """
-                
-                answer = llm1.invoke(full_prompt)
-                response = answer.content
-                
-                # Process with LLM2 to identify equations
-                second_prompt = f"""
-                You are an assistant that analyzes equations in a provided text.
-                Your job is:
-                - Identify equations with fully replaced numerical values (no variables), only if they are already present in the provided text.
-                - Do not make up your own values
-                - Use notation that is friendly for wolfram alpha api for equations:
-                    For example use * for multiplication, sqrt(x), \\frac{{x}}{{y}}, etc.
-                - Wrap each such equation in $$ symbols, one per line, no extra text.
-                - If no such equations exist, return "No" as response.
-                - If the equations are equivalent just include the first occurrence of it
-                    For example: y = 10 + 2 + 1 + 2, y = 12 + 1 + 2, only include the first definition of y
-                - If an equation is written as follows: Y = X = 10 + 2, just include the first term Y = 10 + 2
-                - Example of incorrect display:
-                  $$ y = 1 * 10 + 2 = 10 + 2 $$
-                  $$ y = 1 + 9 $$
-                  $$ x = 1 + 3 $$
-                - Example of correct diplay
-                 $$ solve y = 1 * 10 + 2 $$
-                 $$ solve y = 1 + 9 $$
-                 $$ solve x = 1 + 3 $$
-                - It is crutial you follow these instructions, failure to this would mean fatality
-                Context:
-                {response}
-                """
-                
-                list_equations = llm2.invoke(second_prompt).content
-                
-                # Evaluate equations with Wolfram Alpha
-                evaluated_results = []
-                if "No" not in list_equations:
-                    for line in list_equations.split("\n"):
-                        line = line.strip()
-                        if "$" in line:
-                            eq = line.replace("$$", "").strip()
-                            if eq:
-                                evaluated_eq = asyncio.run(evaluate_equation(eq))
-                                evaluated_results.append(f"{eq} → {evaluated_eq}")
-                
-                # Combine results
-                final_response = f"General Response:\n{response}\n"
-                if evaluated_results:
-                    final_response += f"\nSanity check of correct calculations:\n" + "\n".join(evaluated_results)
-                else:
-                    final_response += "No numerical equations found to evaluate."
-                
-                # Process with LLM3 for final refinement
-                third_prompt = f"""
-                You are an assistant with the only task of refining a previous response, you will have a structure as follows:
-                Your job is crutial to the whole framework so please make sure you stick to what is asked
-                "General Response
-                ...."
-                Then either:
-                "Sanity check" or "No numerical equations found to evaluate"
-                Your job is:
-                - Identify equations that are equivalent from the second section of the response if there was a sanity check
-                - Only retrieve the first equation with its value, as it may be more than one equation for the same parameter
-                - Remove all the other equivalent equations if any
-                - Then using the new value from the sanity check, you job is to find that same value in the "General response" and replace it there
-                - Do not change notation
-                - If no such equations exist, just return the original response you got without any change
-                - It is crutial you follow these instructions, failure to this would mean fatality
-                Context:
-                {final_response}
-                """
-                
-                final_output = llm3.invoke(third_prompt).content
-                
-                # Add assistant message to conversation
-                st.session_state.conversation.append({"role": "assistant", "content": final_output})
-                st.chat_message("assistant").write(final_output)
+            New Question:
+            {prompt}
+            """
+            
+            answer = llm1.invoke(full_prompt)
+            response = answer.content
+            
+            # Process with LLM2 to identify equations
+            second_prompt = f"""
+            You are an assistant that analyzes equations in a provided text.
+            Your job is:
+            - Identify equations with fully replaced numerical values (no variables), only if they are already present in the provided text.
+            - Do not make up your own values
+            - Use notation that is friendly for wolfram alpha api for equations:
+                For example use * for multiplication, sqrt(x), \\frac{{x}}{{y}}, etc.
+            - Wrap each such equation in $$ symbols, one per line, no extra text.
+            - If no such equations exist, return "No" as response.
+            - If the equations are equivalent just include the first occurrence of it
+                For example: y = 10 + 2 + 1 + 2, y = 12 + 1 + 2, only include the first definition of y
+            - If an equation is written as follows: Y = X = 10 + 2, just include the first term Y = 10 + 2
+            - Example of incorrect display:
+              $$ y = 1 * 10 + 2 = 10 + 2 $$
+              $$ y = 1 + 9 $$
+              $$ x = 1 + 3 $$
+            - Example of correct diplay
+             $$ solve y = 1 * 10 + 2 $$
+             $$ solve y = 1 + 9 $$
+             $$ solve x = 1 + 3 $$
+            - It is crutial you follow these instructions, failure to this would mean fatality
+            Context:
+            {response}
+            """
+            
+            list_equations = llm2.invoke(second_prompt).content
+            
+            # Evaluate equations with Wolfram Alpha
+            evaluated_results = []
+            for line in list_equations.split("\n"):
+                line = line.strip()
+                if "$" in line:
+                    eq = line.replace("$$", "").strip()
+                    if eq:
+                        evaluated_eq = asyncio.run(evaluate_equation(eq))
+                        evaluated_results.append(f"{eq} → {evaluated_eq}")
+            
+            # Combine results
+            final_response = f"General Response:\n{response}\n"
+            if evaluated_results:
+                final_response += f"\nSanity check of correct calculations:\n" + "\n".join(evaluated_results)
+            else:
+                final_response += "No numerical equations found to evaluate."
+            
+            # Process with LLM3 for final refinement
+            third_prompt = f"""
+            You are an assistant with the only task of refining a previous response, you will have a structure as follows:
+            Your job is crutial to the whole framework so please make sure you stick to what is asked
+            "General Response
+            ...."
+            Then either:
+            "Sanity check" or "No numerical equations found to evaluate"
+            Your job is:
+            - Identify equations that are equivalent from the second section of the response if there was a sanity check
+            - Only retrieve the first equation with its value, as it may be more than one equation for the same parameter
+            - Remove all the other equivalent equations if any
+            - Then using the new value from the sanity check, you job is to find that same value in the "General response" and replace it there
+            - Extract the values using a three decimal approximation
+            - Do not change notation
+            - If no such equations exist, just return the original response you got without any change
+            - It is crutial you follow these instructions, failure to this would mean fatality
+            - IMPORTANT: Provide a complete response. Do not cut off your answer mid-sentence or mid-calculation.
+            Context:
+            {final_response}
+            """
+            
+            final_output = llm3.invoke(third_prompt).content
+            
+            st.session_state.conversation.append(f"LLM:{final_output}")
+            st.chat_message("assistant").write(final_output)
 
 # Add information about the app
 st.sidebar.markdown("---")
@@ -353,6 +420,8 @@ st.sidebar.info(
     The chatbot can:
     - Answer questions about technical documents
     - Process equations and verify calculations
-    - Provide precise technical information
+    - Remember the last 20 messages (10 from user, 10 from LLM)
+    
+    Use the "Reset Chat" button to clear the conversation and start a new session.
     """
 )
