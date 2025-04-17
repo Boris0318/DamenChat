@@ -285,20 +285,23 @@ if st.sidebar.button("Logout"):
     st.session_state.attempts = 0
     st.session_state.conversation = []
     st.session_state.vector_store = None
+    st.session_state.first_query = True
+    st.session_state.vector_store = None
     st.rerun()
 
 # Process uploaded file
-if uploaded_file and not st.session_state.vector_store:
+if uploaded_file and not st.session_state.vector_store and st.session_state.authenticated:
     with st.spinner("Processing document..."):
         st.session_state.vector_store = process_uploaded_file(uploaded_file)
     st.success("Document processed successfully!")
 
 # Display conversation
-for message in st.session_state.conversation:
-    if message.startswith("User:"):
-        st.chat_message("user").write(message.replace("User:", "").strip())
-    elif message.startswith("LLM:"):
-        st.chat_message("assistant").write(message.replace("LLM:", "").strip())
+if st.session_state.authenticated:
+    for message in st.session_state.conversation:
+        if message.startswith("User:"):
+            st.chat_message("user").write(message.replace("User:", "").strip())
+        elif message.startswith("LLM:"):
+            st.chat_message("assistant").write(message.replace("LLM:", "").strip())
 
 # Chat input
 if prompt := st.chat_input("Ask a question about the uploaded document"):
