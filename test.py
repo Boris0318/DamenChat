@@ -1,9 +1,9 @@
 import sys
-try:
-    __import__("pysqlite3")
-    sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
-except ImportError:
-    pass
+# try:
+#     __import__("pysqlite3")
+#     sys.modules["sqlite3"] = sys.modules.pop("pysqlite3")
+# except ImportError:
+#     pass
 import os
 import streamlit as st
 import asyncio
@@ -239,13 +239,14 @@ def process_uploaded_file(uploaded_file):
     
     # Create vector store
     db_name = "chroma_db"
-    collection_name = f"damen_technical_{st.session_state.session_id}"
+    # collection_name = f"damen_technical_{st.session_state.session_id}"
     # Delete the database when adding new documents
     # if os.path.exists(db_name):
     #     Chroma(persist_directory=db_name, embedding_function=embeddings).delete_collection()
     
-    vector_store = Chroma(collection_name=collection_name,embedding_function=embeddings, persist_directory=db_name)
-
+    # vector_store = Chroma(collection_name=collection_name,embedding_function=embeddings, persist_directory=db_name)
+    vector_store = Chroma(embedding_function=embeddings, persist_directory=db_name)
+    
     # try:
     #     vector_store = Chroma(
     #         collection_name=collection_name,
