@@ -18,6 +18,9 @@ import toml
 import threading
 import time
 from datetime import datetime
+import json
+from datetime import datetime
+
 
 # Page configuration
 st.set_page_config(page_title="Damen Technical Chatbot", layout="wide")
@@ -284,6 +287,33 @@ def process_uploaded_file(uploaded_file):
     
     return vector_store
 
+def save_conversation_to_file():
+    if not st.session_state.conversation:
+        st.sidebar.warning("No conversation to save.")
+        return
+    
+    # Create logs directory if it doesn't exist
+    if not os.path.exists("logs"):
+        os.makedirs("logs")
+    
+    # Generate timestamp for filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"logs/conversation_{timestamp}.json"
+    
+    # Format the conversation
+    formatted_conversation = []
+    for message in st.session_state.conversation:
+        if message.startswith("User:"):
+            formatted_conversation.append({"role": "user", "content": message.replace("User:", "").strip()})
+        elif message.startswith("LLM:"):
+            formatted_conversation.append({"role": "assistant", "content": message.replace("LLM:", "").strip()})
+    
+    # Save to file
+    with open(filename, "w") as f:
+        json.dump(formatted_conversation, f, indent=2)
+    
+    st.sidebar.success(f"Conversation saved to {filename}")
+    return filename
 # Main application
 st.title("Damen Technical Chatbot")
 
@@ -294,6 +324,9 @@ uploaded_file = st.sidebar.file_uploader("Upload a JSON file", type=["json"])
 # Add a reset button to the sidebar
 if st.sidebar.button("Reset Chat", key="reset_button"):
     reset_chat()
+
+if st.sidebar.button("Save Conversation", key="save_button"):
+    save_conversation_to_file()
 
 # Add a logout button
 if st.sidebar.button("Logout"):
